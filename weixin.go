@@ -16,6 +16,7 @@ import (
 const (
 	weixinGetTokenURL    = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
 	weixinSendMessageURL = "https://qyapi.weixin.qq.com/cgi-bin/message/send"
+	expiresInMargin      = 600 * time.Second
 )
 
 // weixin 实现了向微信发送通知
@@ -124,22 +125,22 @@ type getTokenResponse struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
-func (w weixin) updateToken(ctx context.Context) {
-	var token string
-	expiresIn := 101 * time.Second
-	var err error
+func (w *weixin) updateToken(ctx context.Context) {
+	expiresIn := expiresInMargin + 60*time.Second
 	for {
 		select {
 		case <-ctx.Done():
 			log.Infof(ctx, "updateToken() cancelled.")
 			return
-		case <-time.After(expiresIn - 100*time.Second):
-			token, expiresIn, err = w.getToken(ctx)
+		case <-time.After(expiresIn - expiresInMargin):
+			token, e, err := w.getToken(ctx)
 			if err != nil {
 				log.Errorf(ctx, "w.GetToken() failed, error: %v.", err)
+				expiresIn = expiresInMargin + 60*time.Second
 				continue
 			}
 
+			expiresIn = e
 			w.token = token
 		}
 	}
