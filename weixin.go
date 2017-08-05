@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bibaijin/notify/log"
+	"go.uber.org/zap"
 )
 
 const (
@@ -28,7 +28,7 @@ type weixin struct {
 }
 
 // NewWeixin 返回初始化后的 wexin
-func NewWeixin(corpID string, appID int, appSecret string) Notifier {
+func NewWeixin(corpID string, appID int, appSecret string, logger *zap.Logger) Notifier {
 	w := weixin{
 		corpID:    corpID,
 		appID:     appID,
@@ -36,14 +36,14 @@ func NewWeixin(corpID string, appID int, appSecret string) Notifier {
 	}
 
 	ctx := context.Background()
-	token, _, _ := w.getToken(ctx)
+	token, _, _ := w.getToken(ctx, logger)
 	w.token = token
-	go w.updateToken(ctx)
+	go w.updateToken(ctx, logger)
 
 	return &w
 }
 
-func (w weixin) Notify(ctx context.Context, users []string, message string) error {
+func (w weixin) Notify(ctx context.Context, users []string, message string, logger *zap.Logger) error {
 	params := url.Values{}
 	params.Add("access_token", w.token)
 	url := fmt.Sprintf("%s?%s", weixinSendMessageURL, params.Encode())
@@ -59,22 +59,30 @@ func (w weixin) Notify(ctx context.Context, users []string, message string) erro
 	}
 	bs, err := json.Marshal(body)
 	if err != nil {
-		log.Errorf(ctx, "json.Marshal(%+v) failed, error: %v.", body, err)
+		logger.Error("json.Marshal() failed.",
+			zap.Any("body", body),
+			zap.Error(err),
+		)
 		return err
 	}
 
-	log.Infof(ctx, "http.Post(%v)....", url)
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(bs))
 	if err != nil {
-		log.Errorf(ctx, "http.Post(%v) failed, error: %v.", url, err)
+		logger.Error("http.Post() failed.",
+			zap.String("URL", url),
+			zap.Error(err),
+		)
+		return err
 	}
+	logger.Debug("http.Post() done.",
+		zap.String("URL", url),
+		zap.Any("response", resp),
+	)
 
 	var data sendMessageResponse
 	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return err
 	}
-
-	log.Infof(ctx, "http.Post(%v) done, response: %+v.", url, data)
 
 	if data.ErrCode != 0 {
 		return fmt.Errorf("%v", data.ErrMsg)
@@ -91,25 +99,29 @@ type sendMessageResponse struct {
 	InvalidTag   string `json:"invalidtag"`
 }
 
-func (w weixin) getToken(ctx context.Context) (token string, expiresIn time.Duration, err error) {
+func (w weixin) getToken(ctx context.Context, logger *zap.Logger) (token string, expiresIn time.Duration, err error) {
 	params := url.Values{}
 	params.Add("corpid", w.corpID)
 	params.Add("corpsecret", w.appSecret)
 
 	url := fmt.Sprintf("%s?%s", weixinGetTokenURL, params.Encode())
-	log.Infof(ctx, "http.Get(%v)....", url)
 	resp, err := http.Get(url)
 	if err != nil {
-		log.Errorf(ctx, "http.Get(%v) failed, error: %v.", url, err)
+		logger.Error("http.Get() failed.",
+			zap.String("URL", url),
+			zap.Error(err),
+		)
 		return "", 0, err
 	}
+	logger.Debug("http.Get() done.",
+		zap.String("URL", url),
+		zap.Any("response", resp),
+	)
 
 	var data getTokenResponse
 	if err = json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return "", 0, err
 	}
-
-	log.Infof(ctx, "http.Get(%v) done, response: %+v.", url, data)
 
 	if data.ErrCode != 0 {
 		return "", 0, fmt.Errorf("%v", data.ErrMsg)
@@ -125,17 +137,17 @@ type getTokenResponse struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
-func (w *weixin) updateToken(ctx context.Context) {
+func (w *weixin) updateToken(ctx context.Context, logger *zap.Logger) {
 	expiresIn := expiresInMargin + 60*time.Second
 	for {
 		select {
 		case <-ctx.Done():
-			log.Infof(ctx, "updateToken() cancelled.")
+			logger.Info("updateToken() cancelled.")
 			return
 		case <-time.After(expiresIn - expiresInMargin):
-			token, e, err := w.getToken(ctx)
+			token, e, err := w.getToken(ctx, logger)
 			if err != nil {
-				log.Errorf(ctx, "w.GetToken() failed, error: %v.", err)
+				logger.Error("w.GetToken() failed.", zap.Error(err))
 				expiresIn = expiresInMargin + 60*time.Second
 				continue
 			}
