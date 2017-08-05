@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
 )
 
 func TestWeixinNotify(t *testing.T) {
@@ -29,8 +30,8 @@ func TestWeixinNotify(t *testing.T) {
 
 	ctx := context.Background()
 	for _, c := range cases {
-		w := NewWeixin(c.corpID, c.appID, c.appSecret)
-		err := w.Notify(ctx, c.users, c.message)
+		w := NewWeixin(c.corpID, c.appID, c.appSecret, zap.L())
+		err := w.Notify(ctx, c.users, c.message, zap.L())
 		assert.Nil(t, err)
 	}
 }
