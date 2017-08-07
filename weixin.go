@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -21,6 +22,7 @@ const (
 
 // weixin 实现了向微信发送通知
 type weixin struct {
+	mutex     *sync.Mutex
 	corpID    string
 	appID     int
 	appSecret string
@@ -30,6 +32,7 @@ type weixin struct {
 // NewWeixin 返回初始化后的 wexin
 func NewWeixin(corpID string, appID int, appSecret string, logger *zap.Logger) Notifier {
 	w := weixin{
+		mutex:     &sync.Mutex{},
 		corpID:    corpID,
 		appID:     appID,
 		appSecret: appSecret,
@@ -45,7 +48,9 @@ func NewWeixin(corpID string, appID int, appSecret string, logger *zap.Logger) N
 
 func (w weixin) Notify(ctx context.Context, users []string, message string, logger *zap.Logger) error {
 	params := url.Values{}
+	w.mutex.Lock()
 	params.Add("access_token", w.token)
+	w.mutex.Unlock()
 	url := fmt.Sprintf("%s?%s", weixinSendMessageURL, params.Encode())
 
 	body := map[string]interface{}{
@@ -153,7 +158,9 @@ func (w *weixin) updateToken(ctx context.Context, logger *zap.Logger) {
 			}
 
 			expiresIn = e
+			w.mutex.Lock()
 			w.token = token
+			w.mutex.Unlock()
 		}
 	}
 }
